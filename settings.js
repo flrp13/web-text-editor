@@ -1,7 +1,9 @@
 export const settings = {
-    editorBgColor: 'black',
+    editorBgColor: '#1B1B1B',
+    sidebarColor: '#000',
     fontColor: 'white',
-    fontSize: 36,
+    fontFamily: 'Space Mono',
+    fontSize: 16,
     useSpacesForTabs: false,
     tabSize: 4
 }

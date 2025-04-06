@@ -1,21 +1,29 @@
 import { settings } from "./settings.js";
 
-const SCALE_FACTOR = 1.4
-const NUMBERED_LINE_START = 200
-const LINE_START_X = NUMBERED_LINE_START + settings.fontSize * SCALE_FACTOR
-
 const canvas = document.getElementById('editor')
 const ctx = canvas.getContext("2d");
-const body = document.body
+canvas.height = document.body.offsetHeight
+canvas.width = document.body.offsetWidth
+ctx.font = `${settings.fontSize}px ${settings.fontFamily}`
+
+
+// Path2D path names
+const ICON_FILE_PATH = 'iconFilePath'
+
+
+let SCALE_FACTOR = 1.2
+let LINE_START_TEXT = settings.fontSize * SCALE_FACTOR
+
 canvas.style.cursor = 'text'
 
-let textStrRepr = '\tHello world\n I\'m Mike'
-let text // editor text lines
-let currTextLineIdx = 0 // current selected text line
+let text = ['']// editor text lines
+let currTextLineIdx = 0 // current text line we're on
 let currCursorIdx = 0
 let charWidth
+let lineNumW
+let lineNumMaxTextW
 
-const cursorPos = [LINE_START_X, 0] // x, y
+const blinkingCursorParams = { x: 0, y: 0, w: 3, h: settings.fontSize * SCALE_FACTOR }
 
 let keyCombination = ''
 
@@ -24,45 +32,84 @@ let lastBlinkTime = Date.now()
 
 // params involved in text highlighting
 const initialClickPos = [0, 0]
-const highlightParams = [0, 0, 0, 0] // x, y, width, height
+const highlightParams = { x: 0, y: 0, w: 0, h: 0 }
 let isHighlight = false
 
-const file = new Path2D('M213.65723,66.34326l-40-40A8.00076,8.00076,0,0,0,168,24H88A16.01833,16.01833,0,0,0,72,40V56H56A16.01833,16.01833,0,0,0,40,72V216a16.01833,16.01833,0,0,0,16,16H168a16.01833,16.01833,0,0,0,16-16V200h16a16.01833,16.01833,0,0,0,16-16V72A8.00035,8.00035,0,0,0,213.65723,66.34326ZM136,192H88a8,8,0,0,1,0-16h48a8,8,0,0,1,0,16Zm0-32H88a8,8,0,0,1,0-16h48a8,8,0,0,1,0,16Zm64,24H184V104a8.00035,8.00035,0,0,0-2.34277-5.65674l-40-40A8.00076,8.00076,0,0,0,136,56H88V40h76.68652L200,75.314Z')
-let separator
+const fileIcon = new Image()
+fileIcon.src = 'file.svg'
+
 let isSeparatorHovered = false
 
 
-function init() {
-    canvas.height = body.offsetHeight
-    canvas.width = body.offsetWidth
-    parseTextStrRepr()
-    window.requestAnimationFrame(draw);
+// this allows to use images in conjuction with isPointInPath
+ctx.paths = {}
+ctx.customDrawImage = function (image, name, x, y) {
+    this.drawImage(image, x, y)
+    this.paths[name] = new Path2D()
+    this.paths[name].rect(x, y, image.width, image.height)
 }
 
+window.addEventListener('DOMContentLoaded', () => {
+    window.requestAnimationFrame(draw);
+})
+
 function draw() {
+    let cw = canvas.width
+    let ch = canvas.height
+    let charW = ctx.measureText('a').width
+
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     ctx.setTransform(1, 0, 0, 1, 0, 0)
 
-    // Canvas
+    // TOP BAR
+    ctx.fillStyle = settings.sidebarColor
+    ctx.fillRect(0, 0, cw, 40)
+    ctx.translate(0, 40)
+    ch -= 40
+
+    // SIDE BAR
+    ctx.fillStyle = settings.sidebarColor
+    ctx.fillRect(0, 0, 300, ch)
+
+    ctx.customDrawImage(fileIcon, ICON_FILE_PATH, 0, 0)
+
+    ctx.translate(300, 0)
+    cw -= 300
+
+    // SEPARATOR
+    ctx.fillStyle = 'green'
+    ctx.fillRect(0, 0, 3, ch)
+    ctx.translate(3, 0)
+    cw -= 3
+
+    // EDITOR
     ctx.fillStyle = settings.editorBgColor
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    ctx.save()
+    ctx.fillRect(0, 0, cw, ch)
+    ctx.translate(3, 3) // some padding inside editor
+    cw -= 3
+    ch -= 3
+
 
     // Line numbers
-    ctx.font = `${settings.fontSize}px Space Mono`
     ctx.fillStyle = 'grey'
-    for (let i = 0; i < text.length; i++) {
-        ctx.fillText(i + 1, NUMBERED_LINE_START, settings.fontSize * (i + 1))
+    let marginRight = 5
+    lineNumMaxTextW = ctx.measureText(text.length).width
+    lineNumW = lineNumMaxTextW * 1.2
+    for (let i = 1; i <= text.length; i++) {
+        let currentTextW = ctx.measureText(i).width
+        ctx.fillText(i, lineNumW - currentTextW, settings.fontSize * i)
     }
+    ctx.translate(lineNumW + marginRight, 0)
+    cw -= lineNumW + marginRight
 
     if (isHighlight) {
-        ctx.fillRect(...highlightParams)
+        ctx.fillRect(0, 0, 0, 0)
     }
 
     // Text lines
     ctx.fillStyle = settings.fontColor
     for (const [i, line] of text.entries()) {
-        ctx.fillText(line, LINE_START_X, settings.fontSize * (i + 1))
+        ctx.fillText(line, 0, settings.fontSize * (i + 1))
         charWidth = ctx.measureText('a').width
     }
 
@@ -74,22 +121,9 @@ function draw() {
     }
 
     if (showCursor) {
-        ctx.fillRect(...cursorPos, 5, settings.fontSize)
+        ctx.fillRect(...Object.values(blinkingCursorParams))
         ctx.fillStyle = settings.fontColor
     }
-
-    ctx.scale(0.15, 0.15);
-    ctx.fillStyle = 'white'
-    ctx.fill(file)
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-
-
-    separator = new Path2D()
-    separator.rect(NUMBERED_LINE_START, 0, 3, canvas.height)
-    ctx.fillStyle = isSeparatorHovered ? 'blue' : 'grey'
-    ctx.fill(separator)
-
-
 
     window.requestAnimationFrame(draw)
 }
@@ -210,28 +244,6 @@ window.addEventListener('keydown', (e) => {
     updateCursorPos()
 })
 
-
-
-function parseTextStrRepr() {
-
-    if (textStrRepr) {
-        let newStrRepr = textStrRepr.replaceAll('\t', ' '.repeat(settings.tabSize))
-
-        text = newStrRepr.split('\n')
-    } else {
-        text = ['']
-    }
-}
-
-function convertToTextStrRepr() {
-    textStrRepr = text.join('\n')
-    if (!settings.useSpacesForTabs) {
-        textStrRepr = textStrRepr.replaceAll(' '.repeat(settings.tabSize), '\t')
-    }
-    console.log(JSON.stringify(textStrRepr))
-}
-
-
 window.addEventListener('keyup', (e) => {
     // A key combination means that keys are pressed (and stay pressed)
     // in succession, until an action is triggered when usually last key pressed
@@ -252,9 +264,10 @@ function tryProcessKeyCombination(str) {
     }
 }
 
+
 function updateCursorPos() {
-    cursorPos[0] = LINE_START_X + charWidth * currCursorIdx
-    cursorPos[1] = settings.fontSize * currTextLineIdx
+    blinkingCursorParams.x = LINE_START_TEXT + charWidth * currCursorIdx - cursorSize[0] / 2
+    blinkingCursorParams.y = settings.fontSize * currTextLineIdx + (cursorHeight - settings.fontSize) / 2
 }
 
 function positionCursor(x, y) {
@@ -276,10 +289,10 @@ function positionCursor(x, y) {
         }
     }
 
-    if (x < LINE_START_X) {
+    if (x < LINE_START_TEXT) {
         currCursorIdx = 0
     } else {
-        let calcCursorIdx = Math.round((x - LINE_START_X) / charWidth)
+        let calcCursorIdx = Math.round((x - LINE_START_TEXT) / charWidth)
         if (calcCursorIdx > text[currTextLineIdx].length) {
             currCursorIdx = text[currTextLineIdx].length
         } else {
@@ -291,12 +304,12 @@ function positionCursor(x, y) {
 }
 
 function highlightSelection() {
-    highlightParams[0] = initialClickPos[0]
-    highlightParams[1] = initialClickPos[1]
-    highlightParams[2] = cursorPos[0] - initialClickPos[0]
-    highlightParams[3] = settings.fontSize
+    highlightParams.x = initialClickPos[0]
+    highlightParams.y = initialClickPos[1]
+    highlightParams.w = blinkingCursorParams[0] - initialClickPos[0]
+    highlightParams.h = settings.fontSize
     // console.log('x: ', highlightParams[0], 'y: ', highlightParams[1], 'width: ', highlightParams[2],'height: ', highlightParams[3])
-    console.log('x: ', cursorPos[0], ' y: ', cursorPos[1])
+    console.log('x: ', blinkingCursorParams[0], ' y: ', blinkingCursorParams[1])
 }
 
 let leftClickPressed = false
@@ -314,13 +327,6 @@ window.addEventListener('mousemove', (e) => {
         highlightSelection()
     }
 
-    if (ctx.isPointInPath(separator, x, y)) {
-        isSeparatorHovered = true
-        canvas.style.cursor = 'ew-resize'
-    } else {
-        isSeparatorHovered = false
-        canvas.style.cursor = 'text'
-    }
 })
 
 window.addEventListener('mousedown', (e) => {
@@ -331,6 +337,7 @@ window.addEventListener('mousedown', (e) => {
     // and second click should cancel highlight
     if (isHighlight) {
         isHighlight = false
+        highlightParams = { x: 0, y: 0, w: 0, h: 0 }
     }
     if (leftClickPressed) {
         // this is basically a normal click
@@ -339,8 +346,8 @@ window.addEventListener('mousedown', (e) => {
 
         // save initial click position to serve as 
         // potential text selection starting point
-        initialClickPos[0] = cursorPos[0]
-        initialClickPos[1] = cursorPos[1]
+        initialClickPos[0] = blinkingCursorParams[0]
+        initialClickPos[1] = blinkingCursorParams[1]
     }
 })
 
@@ -354,11 +361,6 @@ window.addEventListener('mouseup', (e) => {
 
 // Scale canvas on resize
 window.addEventListener('resize', () => {
-    canvas.height = body.offsetHeight
-    canvas.width = body.offsetWidth
+    canvas.height = document.body.offsetHeight
+    canvas.width = document.body.offsetWidth
 })
-
-
-
-
-init()

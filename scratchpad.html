@@ -1,0 +1,49 @@
+<style>
+    body {
+        height: 100%;
+    }
+</style>
+<body>
+    
+</body>
+<script>
+mx = 0
+my = 0
+click = false
+down = false
+document.body.addEventListener('pointerdown', function(e) {
+    click = true
+    down = true
+})
+document.body.addEventListener('pointerup', function (e) {
+    down = false
+})
+document.body.addEventListener('pointermove', function (e) {
+    mx = e.offsetX
+    my = e.offsetY 
+})
+
+function hit_box(mx, my, x, y, w, h) {
+    return (
+        mx >= x && mx < x+w &&
+        my >= y && my < y+h
+    )
+}
+
+function button(text, x, y, w, h) {
+    let hit = hit_box(mx, my, x, y, w, h)
+    // ...
+    return click && hit
+}
+
+function draw() {
+
+    if (button('OK', 10, 10, 100, 100)) {
+        //
+    }
+
+    click = false
+    requestAnimationFrame(draw)
+}
+requestAnimationFrame(draw)
+</script>
