@@ -1,49 +1,61 @@
 <style>
+    html,
     body {
+        margin: 0;
         height: 100%;
     }
 </style>
+
 <body>
-    
+    <canvas id="editor"></canvas>
+
 </body>
 <script>
-mx = 0
-my = 0
-click = false
-down = false
-document.body.addEventListener('pointerdown', function(e) {
-    click = true
-    down = true
-})
-document.body.addEventListener('pointerup', function (e) {
-    down = false
-})
-document.body.addEventListener('pointermove', function (e) {
-    mx = e.offsetX
-    my = e.offsetY 
-})
+    // mx = 0
+    // my = 0
+    // click = false
+    // down = false
+    // document.body.addEventListener('pointerdown', function(e) {
+    //     click = true
+    //     down = true
+    // })
+    // document.body.addEventListener('pointerup', function (e) {
+    //     down = false
+    // })
+    // document.body.addEventListener('pointermove', function (e) {
+    //     mx = e.offsetX
+    //     my = e.offsetY 
+    // })
 
-function hit_box(mx, my, x, y, w, h) {
-    return (
-        mx >= x && mx < x+w &&
-        my >= y && my < y+h
-    )
-}
+    // function hit_box(mx, my, x, y, w, h) {
+    //     return (
+    //         mx >= x && mx < x+w &&
+    //         my >= y && my < y+h
+    //     )
+    // }
 
-function button(text, x, y, w, h) {
-    let hit = hit_box(mx, my, x, y, w, h)
-    // ...
-    return click && hit
-}
+    // function button(text, x, y, w, h) {
+    //     let hit = hit_box(mx, my, x, y, w, h)
+    //     // ...
+    //     return click && hit
+    // }
+    const canvas = document.getElementById('editor')
+    const ctx = canvas.getContext("2d");
+    canvas.height = document.body.offsetHeight
+    canvas.width = document.body.offsetWidth
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-function draw() {
+        // if (button('OK', 10, 10, 100, 100)) {
+        //     //
+        // }
 
-    if (button('OK', 10, 10, 100, 100)) {
-        //
+        // click = false
+        ctx.font = '30px Arial'
+        ctx.fillStyle = 'black'
+        ctx.fillText('ÁjpqÑ', 4, 33)
+        ctx.fillText('jÁpqÑ', 4, 2 * 33)
+        requestAnimationFrame(draw)
     }
-
-    click = false
     requestAnimationFrame(draw)
-}
-requestAnimationFrame(draw)
 </script>

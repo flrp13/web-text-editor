@@ -1,18 +1,23 @@
-import { settings } from "./settings.js";
-
 const canvas = document.getElementById('editor')
 const ctx = canvas.getContext("2d");
 canvas.height = document.body.offsetHeight
 canvas.width = document.body.offsetWidth
-ctx.font = `${settings.fontSize}px ${settings.fontFamily}`
+let userSettings
 
+window.addEventListener('DOMContentLoaded', async () => {
+    userSettings = await (await fetch('./settings.json')).json()
+    ctx.font = `${userSettings.fontSize}px ${userSettings.fontFamily}`
+    window.requestAnimationFrame(draw);
+})
+
+const editorConfig = {
+    ...textMeasure(ctx.font)
+}
+const buffer = createTextBuffer('Hi everyone Im mike\nHappy to be here')
+const cursor = createCursor()
 
 // Path2D path names
 const ICON_FILE_PATH = 'iconFilePath'
-
-
-let SCALE_FACTOR = 1.2
-let LINE_START_TEXT = settings.fontSize * SCALE_FACTOR
 
 canvas.style.cursor = 'text'
 
@@ -22,8 +27,6 @@ let currCursorIdx = 0
 let charWidth
 let lineNumW
 let lineNumMaxTextW
-
-const blinkingCursorParams = { x: 0, y: 0, w: 3, h: settings.fontSize * SCALE_FACTOR }
 
 let keyCombination = ''
 
@@ -49,26 +52,21 @@ ctx.customDrawImage = function (image, name, x, y) {
     this.paths[name].rect(x, y, image.width, image.height)
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-    window.requestAnimationFrame(draw);
-})
-
 function draw() {
     let cw = canvas.width
     let ch = canvas.height
-    let charW = ctx.measureText('a').width
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     ctx.setTransform(1, 0, 0, 1, 0, 0)
 
     // TOP BAR
-    ctx.fillStyle = settings.sidebarColor
+    ctx.fillStyle = userSettings.sidebarColor
     ctx.fillRect(0, 0, cw, 40)
     ctx.translate(0, 40)
     ch -= 40
 
     // SIDE BAR
-    ctx.fillStyle = settings.sidebarColor
+    ctx.fillStyle = userSettings.sidebarColor
     ctx.fillRect(0, 0, 300, ch)
 
     ctx.customDrawImage(fileIcon, ICON_FILE_PATH, 0, 0)
@@ -83,7 +81,7 @@ function draw() {
     cw -= 3
 
     // EDITOR
-    ctx.fillStyle = settings.editorBgColor
+    ctx.fillStyle = userSettings.editorBgColor
     ctx.fillRect(0, 0, cw, ch)
     ctx.translate(3, 3) // some padding inside editor
     cw -= 3
@@ -92,13 +90,14 @@ function draw() {
 
     // Line numbers
     ctx.fillStyle = 'grey'
-    let marginRight = 5
-    lineNumMaxTextW = ctx.measureText(text.length).width
+
+    lineNumMaxTextW = ctx.measureText(text.length.toString()).width
     lineNumW = lineNumMaxTextW * 1.2
-    for (let i = 1; i <= text.length; i++) {
+    for (let i = 1; i <= buffer.length; i++) {
         let currentTextW = ctx.measureText(i).width
-        ctx.fillText(i, lineNumW - currentTextW, settings.fontSize * i)
+        ctx.fillText(i, lineNumW - currentTextW, editorConfig.editorTextHeight * i)
     }
+    let marginRight = 5
     ctx.translate(lineNumW + marginRight, 0)
     cw -= lineNumW + marginRight
 
@@ -107,23 +106,10 @@ function draw() {
     }
 
     // Text lines
-    ctx.fillStyle = settings.fontColor
-    for (const [i, line] of text.entries()) {
-        ctx.fillText(line, 0, settings.fontSize * (i + 1))
-        charWidth = ctx.measureText('a').width
-    }
+    drawText(ctx, buffer, editorConfig)
 
     // Blinking cursor
-    const now = Date.now()
-    if (now - lastBlinkTime > 500) {
-        lastBlinkTime = now
-        showCursor = showCursor ? false : true
-    }
-
-    if (showCursor) {
-        ctx.fillRect(...Object.values(blinkingCursorParams))
-        ctx.fillStyle = settings.fontColor
-    }
+    drawBlinkingCursor(ctx, cursor, editorConfig)
 
     window.requestAnimationFrame(draw)
 }
@@ -227,8 +213,8 @@ window.addEventListener('keydown', (e) => {
                 let incrementCursorIdxAmount = 1
                 let toInsert = e.key
                 if (toInsert == 'Tab') {
-                    toInsert = ' '.repeat(settings.tabSize)
-                    incrementCursorIdxAmount = settings.tabSize
+                    toInsert = ' '.repeat(userSettings.tabSize)
+                    incrementCursorIdxAmount = userSettings.tabSize
                 }
                 if (currCursorIdx != text[currTextLineIdx].length) {
                     // we "insert" chars at cursor pos
@@ -264,52 +250,11 @@ function tryProcessKeyCombination(str) {
     }
 }
 
-
-function updateCursorPos() {
-    blinkingCursorParams.x = LINE_START_TEXT + charWidth * currCursorIdx - cursorSize[0] / 2
-    blinkingCursorParams.y = settings.fontSize * currTextLineIdx + (cursorHeight - settings.fontSize) / 2
-}
-
-function positionCursor(x, y) {
-    // if clicked too high up the page
-    if (y < settings.fontSize) {
-        // focus first line
-        currTextLineIdx = 0
-    } else {
-        // focus correct text line depending on fontSize
-        // these are indexes so we subtract 1 every time
-        let calcLineIdx = Math.round(y / settings.fontSize) - 1
-        // make sure calculated line idx is within existing line indexes
-        if (calcLineIdx > text.length - 1) {
-            // if clicked too low in the page (lower than last line with text)
-            // focus last line of text
-            currTextLineIdx = text.length - 1
-        } else {
-            currTextLineIdx = calcLineIdx
-        }
-    }
-
-    if (x < LINE_START_TEXT) {
-        currCursorIdx = 0
-    } else {
-        let calcCursorIdx = Math.round((x - LINE_START_TEXT) / charWidth)
-        if (calcCursorIdx > text[currTextLineIdx].length) {
-            currCursorIdx = text[currTextLineIdx].length
-        } else {
-            currCursorIdx = calcCursorIdx
-        }
-    }
-
-    updateCursorPos()
-}
-
 function highlightSelection() {
     highlightParams.x = initialClickPos[0]
     highlightParams.y = initialClickPos[1]
     highlightParams.w = blinkingCursorParams[0] - initialClickPos[0]
-    highlightParams.h = settings.fontSize
-    // console.log('x: ', highlightParams[0], 'y: ', highlightParams[1], 'width: ', highlightParams[2],'height: ', highlightParams[3])
-    console.log('x: ', blinkingCursorParams[0], ' y: ', blinkingCursorParams[1])
+    highlightParams.h = userSettings.fontSize
 }
 
 let leftClickPressed = false
@@ -319,7 +264,6 @@ window.addEventListener('mousemove', (e) => {
 
     if (leftClickPressed && initialClickPos[0] != x) {
 
-        console.log(true)
         if (!isHighlight) {
             isHighlight = true
         }
@@ -364,3 +308,239 @@ window.addEventListener('resize', () => {
     canvas.height = document.body.offsetHeight
     canvas.width = document.body.offsetWidth
 })
+
+// CURSOR ##################################################################
+function createCursor(initialLine = 0, initialColumn = 0) {
+    return {
+        line: initialLine,
+        column: initialColumn,
+        isVisible: true,
+        lastBlinkTime: Date.now(),
+    }
+}
+
+function moveCursorLeft(cursor, buffer) {
+    if (cursor.column > 0) {
+        cursor.column--
+    } else if (cursor.line > 0) {
+        cursor.line--
+        cursor.column = buffer[cursor.line].length
+    }
+}
+
+function moveCursorRight(cursor, buffer) {
+    if (cursor.column < buffer[cursor.line].length) {
+        cursor.column++
+    } else if (cursor.line < buffer.length - 1) {
+        cursor.line++
+        cursor.column = 0
+    }
+}
+
+function updateCursorBlink(cursor) {
+    let now = Date.now()
+    if (now - cursor.lastBlinkTime > 500) {
+        cursor.lastBlinkTime = now
+        cursor.isVisible = !cursor.isVisible
+    }
+}
+
+function moveCursorToPosition(cursor, line, column) {
+    cursor.line = line
+    cursor.column = column
+}
+
+function convertCoordsToCursorPos(buffer, x, y) {
+
+}
+function getCursorCoords(cursor, charWidth, textHeight) {
+    const x = cursor.column * charWidth
+    const y = cursor.line * textHeight
+    return {
+        cursorX: x,
+        cursorY: y
+    }
+
+}
+
+
+function updateCursorPos() {
+    blinkingCursorParams.x = LINE_START_TEXT + charWidth * currCursorIdx - cursorSize[0] / 2
+    blinkingCursorParams.y = userSettings.fontSize * currTextLineIdx + (cursorHeight - userSettings.fontSize) / 2
+}
+
+function positionCursor(x, y) {
+    // if clicked too high up the page
+    if (y < userSettings.fontSize) {
+        // focus first line
+        currTextLineIdx = 0
+    } else {
+        // focus correct text line depending on fontSize
+        // these are indexes so we subtract 1 every time
+        let calcLineIdx = Math.round(y / userSettings.fontSize) - 1
+        // make sure calculated line idx is within existing line indexes
+        if (calcLineIdx > text.length - 1) {
+            // if clicked too low in the page (lower than last line with text)
+            // focus last line of text
+            currTextLineIdx = text.length - 1
+        } else {
+            currTextLineIdx = calcLineIdx
+        }
+    }
+
+    if (x < LINE_START_TEXT) {
+        currCursorIdx = 0
+    } else {
+        let calcCursorIdx = Math.round((x - LINE_START_TEXT) / charWidth)
+        if (calcCursorIdx > text[currTextLineIdx].length) {
+            currCursorIdx = text[currTextLineIdx].length
+        } else {
+            currCursorIdx = calcCursorIdx
+        }
+    }
+
+    updateCursorPos()
+}
+
+function drawBlinkingCursor(ctx, cursor, editorConfig) {
+
+    // line: initialLine,
+    // column: initialColumn,
+    // isVisible: true,
+    // lastBlinkTime: Date.now(),
+    let { cursorX, cursorY } = getCursorCoords(cursor, editorConfig.editorCharWidth, editorConfig.editorTextHeight)
+    updateCursorBlink(cursor)
+    if (cursor.isVisible) {
+        ctx.fillRect(cursorX, cursorY, 2, editorConfig.editorTextHeight)
+        ctx.fillStyle = userSettings.fontColor
+    }
+}
+
+// TEXT BUFFER ##############################################################
+
+function createTextBuffer(initialText = '') {
+    return initialText ? initialText.split('\n') : ['']
+
+}
+
+function insertTextAt(buffer, lineIndex, charIndex, text) {
+    if (lineIndex < 0 || lineIndex >= buffer.length)
+        throw new Error(`Line Index Out of Bounds, received: ${lineIndex}`)
+
+    let s = buffer[lineIndex]
+    if (charIndex < 0 || charIndex > s.length)
+        throw new Error(`Char Index Out of Bounds, received: ${charIndex}`)
+
+
+    if (text.includes('\n')) {
+
+        const insLines = text.split('\n')
+        const sBeforeIns = s.substring(0, charIndex)
+        const sAfterIns = s.substring(charIndex)
+        buffer[lineIndex] = sBeforeIns + insLines[0]
+        insLines[insLines.length - 1] = insLines[insLines.length - 1] + sAfterIns
+        buffer.splice(lineIndex + 1, 0, ...insLines.slice(1))
+    } else {
+        buffer[lineIndex] = s.substring(0, charIndex) + text + s.substring(charIndex)
+    }
+}
+
+function deleteTextAt(buffer, lineIndex, charIndex, length) {
+    if (lineIndex < 0 || lineIndex >= buffer.length)
+        throw new Error(`Line Index Out of Bounds, received: ${lineIndex}`)
+
+    if (charIndex < 0 || charIndex > buffer[lineIndex].length)
+        throw new Error(`Char Index Out of Bounds, received: ${charIndex}`)
+
+    let currLineIndex = lineIndex
+    let currCharIndex = charIndex
+    let l = length
+    if (l < 0) {
+        l = Math.abs(l)
+        while (1) {
+            if (currCharIndex - l < 0) {
+                l -= currCharIndex
+                currLineIndex--
+                currCharIndex = buffer[currLineIndex].length
+                continue
+            }
+            currCharIndex = currCharIndex - l
+            l = Math.abs(length)
+            break
+        }
+    }
+
+    while (l) {
+        // get current line string/substring length
+        let currStrLen = buffer[currLineIndex].substring(currCharIndex).length
+
+        if (currCharIndex == 0 && l >= currStrLen) {
+            buffer.splice(currLineIndex, 1) // just remove the line from arr
+
+            // currLineIndex stays the same since we removed entry from buffer arr
+            // so indexes after removed line shifted left
+            l -= currStrLen
+            currCharIndex = 0
+
+            continue
+        }
+
+        let sBeforeDel = buffer[currLineIndex].substring(0, currCharIndex)
+        // use 2 substr since first creates a new 0 index starting str
+        // and second removes correct num of chars
+        // .substring(length) works with length > str.length
+        let sAfterDel = buffer[currLineIndex].substring(currCharIndex).substring(l)
+        buffer[currLineIndex] = sBeforeDel + sAfterDel
+
+        if (l > currStrLen) {
+            l -= currStrLen
+            currLineIndex++
+            currCharIndex = 0
+        } else {
+            break
+        }
+    }
+}
+function splitTextLineAt(buffer, lineIndex, charIndex) {
+    if (lineIndex < 0 || lineIndex >= buffer.length)
+        throw new Error(`Line Index Out of Bounds, received: ${lineIndex}`)
+
+    if (charIndex < 0 || charIndex > buffer[lineIndex].length)
+        throw new Error(`Char Index Out of Bounds, received: ${charIndex}`)
+
+    let sBeforeSplit = buffer[lineIndex].substring(0, charIndex)
+    let sAfterSplit = buffer[lineIndex].substring(charIndex)
+    buffer[lineIndex] = sBeforeSplit
+    // move leftover string to next line (++lineIndex)
+    ++lineIndex >= buffer.length ?
+        buffer.push(sAfterSplit) :
+        buffer.splice(lineIndex, 0, sAfterSplit)
+}
+
+function textMeasure(fontStr, lineSpacing = 1) {
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    ctx.font = fontStr
+    const { width, fontBoundingBoxAscent, fontBoundingBoxDescent } = ctx.measureText('M')
+    const fullHeight = (fontBoundingBoxAscent + fontBoundingBoxDescent) * lineSpacing
+    const heightAboveBaseline = fontBoundingBoxAscent * lineSpacing
+    const heightBelowBaseline = fontBoundingBoxDescent * lineSpacing
+
+    return {
+        editorCharWidth: width,
+        editorTextHeight: fullHeight,
+        editorTextBaseline: {
+            fromTop: fontBoundingBoxAscent,
+            heightAbove: heightAboveBaseline,
+            heightBelow: heightBelowBaseline
+        }
+    }
+}
+
+function drawText(ctx, buffer, editorConfig) {
+    ctx.fillStyle = userSettings.fontColor
+    for (const [i, line] of buffer.entries()) {
+        ctx.fillText(line, 0, editorConfig.editorTextHeight * (i + 1))
+        charWidth = ctx.measureText('a').width
+    }
+}
