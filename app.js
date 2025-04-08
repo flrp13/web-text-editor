@@ -1,33 +1,55 @@
-const layout = {
-    topBar: {
-        height: 60,  // Height in pixels
-        color: '#3498db'
-    },
-    sideBar: {
-        width: 250,  // Width in pixels
-        color: 'green'
-    },
-    editor: {
-        color: 'black'
-    }
-};
-
 const topCanvas = document.getElementById('topBar')
 const sideCanvas = document.getElementById('leftPanel')
+const lineNumCanvas = document.getElementById('lineNumbers')
 const editorCanvas = document.getElementById('editor')
 
 const topCtx = topCanvas.getContext('2d')
 const sideCtx = sideCanvas.getContext('2d')
+const lineNumCtx = lineNumCanvas.getContext('2d')
 const editorCtx = editorCanvas.getContext('2d')
 
+let layout
 let topDimensions
 let sideDimensions
+let lineNumDimensions
 let editorDimensions
 let userSettings
 let editorConfig
 let lineNumW
 let lineNumMaxTextW
 let keyCombination = ''
+
+window.addEventListener('DOMContentLoaded', async () => {
+    userSettings = await (await fetch('./settings.json')).json()
+    layout = {
+        topBar: {
+            height: 60,  // Height in pixels
+            color: userSettings.bgColor ?? 'black'
+        },
+        sideBar: {
+            width: 250,  // Width in pixels
+            color: userSettings.bgColor ?? 'black'
+        },
+        lineNum: {
+            width: 30,  // Width in pixels
+            color: userSettings.editorBgColor ?? 'black'
+        },
+        editor: {
+            color: userSettings.editorBgColor ?? 'black'
+        }
+    }
+    updateLayout()
+
+    editorCtx.font = `${userSettings.fontSize}px ${userSettings.fontFamily}`
+    lineNumCtx.font = `${userSettings.fontSize}px ${userSettings.fontFamily}`
+
+    editorCanvas.style.cursor = 'text'
+    editorConfig = {
+        ...textMeasure(editorCtx.font)
+    }
+
+    requestAnimationFrame(draw);
+})
 
 const buffer = createTextBuffer('Hi everyone Im mike\nHappy to be here')
 const cursor = createCursor()
@@ -45,9 +67,13 @@ function updateLayout() {
     positionCanvas(sideCanvas, 0, layout.topBar.height, layout.sideBar.width, windowHeight - layout.topBar.height)
     sideDimensions = resizeCanvas(sideCanvas, layout.sideBar.width, windowHeight - layout.topBar.height)
 
+    // Line numbers (fixed width, height below top bar)
+    positionCanvas(lineNumCanvas, layout.sideBar.width, layout.topBar.height, layout.lineNum.width, windowHeight - layout.topBar.height)
+    lineNumDimensions = resizeCanvas(lineNumCanvas, layout.lineNum.width, windowHeight - layout.topBar.height)
+
     // Editor (remaining space)
-    positionCanvas(editorCanvas, layout.sideBar.width, layout.topBar.height, windowWidth - layout.sideBar.width, windowHeight - layout.topBar.height)
-    editorDimensions = resizeCanvas(editorCanvas, windowWidth - layout.sideBar.width, windowHeight - layout.topBar.height)
+    positionCanvas(editorCanvas, layout.sideBar.width + layout.lineNum.width, layout.topBar.height, windowWidth - layout.sideBar.width - layout.lineNum.width, windowHeight - layout.topBar.height)
+    editorDimensions = resizeCanvas(editorCanvas, windowWidth - layout.sideBar.width - layout.lineNum.width, windowHeight - layout.topBar.height)
 }
 
 
@@ -55,6 +81,10 @@ function draw() {
     clearCanvas(topCtx, topDimensions.width, topDimensions.height)
     drawRect(topCtx, 0, 0, topDimensions.width, topDimensions.height, layout.topBar.color)
 
+    clearCanvas(sideCtx, sideDimensions.width, sideDimensions.height)
+    drawRect(sideCtx, 0, 0, sideDimensions.width, sideDimensions.height, layout.sideBar.color)
+
+    drawLineNums(lineNumCtx, buffer, editorConfig)
     drawEditor(editorCtx, buffer, cursor, editorConfig, editorDimensions)
     requestAnimationFrame(draw)
 }
@@ -71,6 +101,20 @@ function drawEditor(ctx, buffer, cursor, editorConfig, editorDimensions) {
 
     // Things that should reset after each frame
     pointerClick(pointer, false)
+}
+
+function drawLineNums(ctx, buffer, editorConfig) {
+    clearCanvas(ctx, lineNumDimensions.width, lineNumDimensions.height)
+    drawRect(ctx, 0, 0, lineNumDimensions.width, lineNumDimensions.height, layout.editor.color)
+    ctx.fillStyle = 'grey'
+
+    let paddingRight = 5
+    lineNumMaxTextW = buffer.length * editorConfig.editorCharWidth
+    for (let i = 1; i <= buffer.length; i++) {
+        let currentTextW = ctx.measureText(i).width
+        ctx.fillText(i, lineNumDimensions.width - currentTextW - paddingRight, editorConfig.editorTextHeight * i)
+    }
+
 }
 
 // Keyboard events ---------------------------------------------------------------------
@@ -98,35 +142,10 @@ window.addEventListener('keydown', (e) => {
             moveCursor(cursor, buffer, c.DOWN)
             break
         case 'Enter':
-            let textToMoveLower = text[currTextLineIdx].slice(currCursorIdx)
-            text[currTextLineIdx] = text[currTextLineIdx].substring(0, currCursorIdx)
-            text.splice(++currTextLineIdx, 0, textToMoveLower)
-            currCursorIdx = 0
+            splitTextLineAt(buffer, cursor)
             break
         case 'Backspace':
-            let s = text[currTextLineIdx]
-            text[currTextLineIdx] = s.slice(0, Math.max(currCursorIdx - 1, 0) /* for currCursorIdx == 0 case */)
-                + s.slice(currCursorIdx)
-            currCursorIdx--
-
-            if (currCursorIdx < 0) {
-                // if on first line, you can't go further up
-                if (currTextLineIdx != 0) {
-                    let leftoverStr = text[currTextLineIdx] // this can be empty or have values
-                    // remove line and go to next one up
-                    text.splice(currTextLineIdx, 1)
-                    currTextLineIdx--
-                    currCursorIdx = text[currTextLineIdx].length
-
-                    if (leftoverStr) {
-                        // combine leftover text with above line
-                        text[currTextLineIdx] = text[currTextLineIdx] + leftoverStr
-                    }
-                } else {
-                    // reset cursor index
-                    currCursorIdx = 0
-                }
-            }
+            deleteTextAt(buffer, cursor, -1)
             break
         default:
             if (keyCombination) {
@@ -134,22 +153,11 @@ window.addEventListener('keydown', (e) => {
                     keyCombination += `[${e.key}]`
                 }
             } else {
-                let s = text[currTextLineIdx]
-
-                let incrementCursorIdxAmount = 1
-                let toInsert = e.key
-                if (toInsert == 'Tab') {
-                    toInsert = ' '.repeat(userSettings.tabSize)
-                    incrementCursorIdxAmount = userSettings.tabSize
-                }
-                if (currCursorIdx != text[currTextLineIdx].length) {
-                    // we "insert" chars at cursor pos
-                    text[currTextLineIdx] = s.slice(0, currCursorIdx) + toInsert + s.slice(currCursorIdx)
+                if (e.key == 'Tab') {
+                    insertTextAt(buffer, cursor, ' '.repeat(userSettings.tabSize))
                 } else {
-                    // otherwise just append key
-                    text[currTextLineIdx] += toInsert
+                    insertTextAt(buffer, cursor, e.key)
                 }
-                currCursorIdx += incrementCursorIdxAmount
             }
 
     }
@@ -348,37 +356,26 @@ function createTextBuffer(initialText = '') {
 
 }
 
-function insertTextAt(buffer, lineIndex, charIndex, text) {
-    if (lineIndex < 0 || lineIndex >= buffer.length)
-        throw new Error(`Line Index Out of Bounds, received: ${lineIndex}`)
-
-    let s = buffer[lineIndex]
-    if (charIndex < 0 || charIndex > s.length)
-        throw new Error(`Char Index Out of Bounds, received: ${charIndex}`)
-
+function insertTextAt(buffer, cursor, text) {
+    let s = buffer[cursor.line]
 
     if (text.includes('\n')) {
 
         const insLines = text.split('\n')
-        const sBeforeIns = s.substring(0, charIndex)
-        const sAfterIns = s.substring(charIndex)
-        buffer[lineIndex] = sBeforeIns + insLines[0]
+        const sBeforeIns = s.substring(0, cursor.column)
+        const sAfterIns = s.substring(cursor.column)
+        buffer[cursor.line] = sBeforeIns + insLines[0]
         insLines[insLines.length - 1] = insLines[insLines.length - 1] + sAfterIns
-        buffer.splice(lineIndex + 1, 0, ...insLines.slice(1))
+        buffer.splice(cursor.line + 1, 0, ...insLines.slice(1))
     } else {
-        buffer[lineIndex] = s.substring(0, charIndex) + text + s.substring(charIndex)
+        buffer[cursor.line] = s.substring(0, cursor.column) + text + s.substring(cursor.column)
+        cursor.column += text.length
     }
 }
 
-function deleteTextAt(buffer, lineIndex, charIndex, length) {
-    if (lineIndex < 0 || lineIndex >= buffer.length)
-        throw new Error(`Line Index Out of Bounds, received: ${lineIndex}`)
-
-    if (charIndex < 0 || charIndex > buffer[lineIndex].length)
-        throw new Error(`Char Index Out of Bounds, received: ${charIndex}`)
-
-    let currLineIndex = lineIndex
-    let currCharIndex = charIndex
+function deleteTextAt(buffer, cursor, length) {
+    let currLineIndex = cursor.line
+    let currCharIndex = cursor.column
     let l = length
     if (l < 0) {
         l = Math.abs(l)
@@ -425,21 +422,18 @@ function deleteTextAt(buffer, lineIndex, charIndex, length) {
             break
         }
     }
+    cursor.line = currLineIndex
+    cursor.column = currCharIndex
 }
-function splitTextLineAt(buffer, lineIndex, charIndex) {
-    if (lineIndex < 0 || lineIndex >= buffer.length)
-        throw new Error(`Line Index Out of Bounds, received: ${lineIndex}`)
-
-    if (charIndex < 0 || charIndex > buffer[lineIndex].length)
-        throw new Error(`Char Index Out of Bounds, received: ${charIndex}`)
-
-    let sBeforeSplit = buffer[lineIndex].substring(0, charIndex)
-    let sAfterSplit = buffer[lineIndex].substring(charIndex)
-    buffer[lineIndex] = sBeforeSplit
-    // move leftover string to next line (++lineIndex)
-    ++lineIndex >= buffer.length ?
+function splitTextLineAt(buffer, cursor) {
+    let sBeforeSplit = buffer[cursor.line].substring(0, cursor.column)
+    let sAfterSplit = buffer[cursor.line].substring(cursor.column)
+    buffer[cursor.line] = sBeforeSplit
+    // move leftover string to next line (++cursor.line)
+    ++cursor.line >= buffer.length ?
         buffer.push(sAfterSplit) :
-        buffer.splice(lineIndex, 0, sAfterSplit)
+        buffer.splice(cursor.line, 0, sAfterSplit)
+    cursor.column = 0
 }
 
 function textMeasure(fontStr, lineSpacing = 1) {
@@ -502,17 +496,7 @@ function resizeCanvas(canvas, width, height) {
 window.addEventListener('resize', (e) => {
     updateLayout()
     editorCtx.font = `${userSettings.fontSize}px ${userSettings.fontFamily}`
+    lineNumCtx.font = `${userSettings.fontSize}px ${userSettings.fontFamily}`
 })
 
-window.addEventListener('DOMContentLoaded', async () => {
-    updateLayout()
 
-    userSettings = await (await fetch('./settings.json')).json()
-    editorCtx.font = `${userSettings.fontSize}px ${userSettings.fontFamily}`
-    editorCanvas.style.cursor = 'text'
-    editorConfig = {
-        ...textMeasure(editorCtx.font)
-    }
-
-    requestAnimationFrame(draw);
-})
