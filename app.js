@@ -1,109 +1,67 @@
-const canvas = document.getElementById('editor')
-const ctx = canvas.getContext("2d");
-canvas.height = document.body.offsetHeight
-canvas.width = document.body.offsetWidth
+const layout = {
+    topBar: {
+        height: 60,  // Height in pixels
+        color: '#3498db'
+    },
+    sideBar: {
+        width: 250,  // Width in pixels
+        color: 'green'
+    },
+    editor: {
+        color: 'black'
+    }
+};
+
+const topCanvas = document.getElementById('topBar')
+const sideCanvas = document.getElementById('leftPanel')
+const editorCanvas = document.getElementById('editor')
+
+const topCtx = topCanvas.getContext('2d')
+const sideCtx = sideCanvas.getContext('2d')
+const editorCtx = editorCanvas.getContext('2d')
+
+let topDimensions
+let sideDimensions
+let editorDimensions
 let userSettings
-
-window.addEventListener('DOMContentLoaded', async () => {
-    userSettings = await (await fetch('./settings.json')).json()
-    ctx.font = `${userSettings.fontSize}px ${userSettings.fontFamily}`
-    window.requestAnimationFrame(draw);
-})
-
-const editorConfig = {
-    ...textMeasure(ctx.font)
-}
-const buffer = createTextBuffer('Hi everyone Im mike\nHappy to be here')
-const cursor = createCursor()
-
-// Path2D path names
-const ICON_FILE_PATH = 'iconFilePath'
-
-canvas.style.cursor = 'text'
-
-let text = ['']// editor text lines
-let currTextLineIdx = 0 // current text line we're on
-let currCursorIdx = 0
-let charWidth
+let editorConfig
 let lineNumW
 let lineNumMaxTextW
-
 let keyCombination = ''
 
-let showCursor = true
-let lastBlinkTime = Date.now()
+const buffer = createTextBuffer('Hi everyone Im mike\nHappy to be here')
+const cursor = createCursor()
+const pointer = createPointer()
 
-// params involved in text highlighting
-const initialClickPos = [0, 0]
-const highlightParams = { x: 0, y: 0, w: 0, h: 0 }
-let isHighlight = false
+function updateLayout() {
+    const windowWidth = window.innerWidth
+    const windowHeight = window.innerHeight
 
-const fileIcon = new Image()
-fileIcon.src = 'file.svg'
+    // Top bar (full width, fixed height)
+    positionCanvas(topCanvas, 0, 0, windowWidth, layout.topBar.height)
+    topDimensions = resizeCanvas(topCanvas, windowWidth, layout.topBar.height)
 
-let isSeparatorHovered = false
+    // Side bar (fixed width, height below top bar)
+    positionCanvas(sideCanvas, 0, layout.topBar.height, layout.sideBar.width, windowHeight - layout.topBar.height)
+    sideDimensions = resizeCanvas(sideCanvas, layout.sideBar.width, windowHeight - layout.topBar.height)
 
-
-// this allows to use images in conjuction with isPointInPath
-ctx.paths = {}
-ctx.customDrawImage = function (image, name, x, y) {
-    this.drawImage(image, x, y)
-    this.paths[name] = new Path2D()
-    this.paths[name].rect(x, y, image.width, image.height)
+    // Editor (remaining space)
+    positionCanvas(editorCanvas, layout.sideBar.width, layout.topBar.height, windowWidth - layout.sideBar.width, windowHeight - layout.topBar.height)
+    editorDimensions = resizeCanvas(editorCanvas, windowWidth - layout.sideBar.width, windowHeight - layout.topBar.height)
 }
 
+
 function draw() {
-    let cw = canvas.width
-    let ch = canvas.height
+    clearCanvas(topCtx, topDimensions.width, topDimensions.height)
+    drawRect(topCtx, 0, 0, topDimensions.width, topDimensions.height, layout.topBar.color)
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    drawEditor(editorCtx, buffer, cursor, editorConfig, editorDimensions)
+    requestAnimationFrame(draw)
+}
 
-    // TOP BAR
-    ctx.fillStyle = userSettings.sidebarColor
-    ctx.fillRect(0, 0, cw, 40)
-    ctx.translate(0, 40)
-    ch -= 40
-
-    // SIDE BAR
-    ctx.fillStyle = userSettings.sidebarColor
-    ctx.fillRect(0, 0, 300, ch)
-
-    ctx.customDrawImage(fileIcon, ICON_FILE_PATH, 0, 0)
-
-    ctx.translate(300, 0)
-    cw -= 300
-
-    // SEPARATOR
-    ctx.fillStyle = 'green'
-    ctx.fillRect(0, 0, 3, ch)
-    ctx.translate(3, 0)
-    cw -= 3
-
-    // EDITOR
-    ctx.fillStyle = userSettings.editorBgColor
-    ctx.fillRect(0, 0, cw, ch)
-    ctx.translate(3, 3) // some padding inside editor
-    cw -= 3
-    ch -= 3
-
-
-    // Line numbers
-    ctx.fillStyle = 'grey'
-
-    lineNumMaxTextW = ctx.measureText(text.length.toString()).width
-    lineNumW = lineNumMaxTextW * 1.2
-    for (let i = 1; i <= buffer.length; i++) {
-        let currentTextW = ctx.measureText(i).width
-        ctx.fillText(i, lineNumW - currentTextW, editorConfig.editorTextHeight * i)
-    }
-    let marginRight = 5
-    ctx.translate(lineNumW + marginRight, 0)
-    cw -= lineNumW + marginRight
-
-    if (isHighlight) {
-        ctx.fillRect(0, 0, 0, 0)
-    }
+function drawEditor(ctx, buffer, cursor, editorConfig, editorDimensions) {
+    clearCanvas(ctx, editorDimensions.width, editorDimensions.height)
+    drawRect(ctx, 0, 0, editorDimensions.width, editorDimensions.height, layout.editor.color)
 
     // Text lines
     drawText(ctx, buffer, editorConfig)
@@ -111,16 +69,13 @@ function draw() {
     // Blinking cursor
     drawBlinkingCursor(ctx, cursor, editorConfig)
 
-    window.requestAnimationFrame(draw)
+    // Things that should reset after each frame
+    pointerClick(pointer, false)
 }
 
 // Keyboard events ---------------------------------------------------------------------
 window.addEventListener('keydown', (e) => {
     e.preventDefault() // block browser key combination events
-
-    // ensure that cursor is shown when typing
-    showCursor = true
-    lastBlinkTime = Date.now()
 
     switch (e.key) {
         case 'Shift':
@@ -131,45 +86,16 @@ window.addEventListener('keydown', (e) => {
             }
             break
         case 'ArrowLeft':
-            currCursorIdx--
-            if (currCursorIdx < 0) {
-                if (currTextLineIdx != 0) {
-                    // jump to the end of the above line
-                    currCursorIdx = text[--currTextLineIdx].length
-                } else {
-                    currCursorIdx = 0
-                }
-            }
+            moveCursor(cursor, buffer, c.LEFT)
             break
         case 'ArrowRight':
-            currCursorIdx++
-            if (currCursorIdx > text[currTextLineIdx].length) {
-                if (currTextLineIdx != text.length - 1) {
-                    // jump to the beginning of the above line
-                    currTextLineIdx++
-                    currCursorIdx = 0
-                } else {
-                    currCursorIdx = text[currTextLineIdx].length
-                }
-            }
+            moveCursor(cursor, buffer, c.RIGHT)
             break
         case 'ArrowUp':
-            currTextLineIdx--
-            if (currTextLineIdx < 0) {
-                currTextLineIdx = 0
-                currCursorIdx = 0
-            } else if (currCursorIdx > text[currTextLineIdx].length) {
-                currCursorIdx = text[currTextLineIdx].length
-            }
+            moveCursor(cursor, buffer, c.UP)
             break
         case 'ArrowDown':
-            currTextLineIdx++
-            if (currTextLineIdx > text.length - 1) {
-                currTextLineIdx = text.length - 1
-                currCursorIdx = text[currTextLineIdx].length
-            } else if (currCursorIdx > text[currTextLineIdx].length) {
-                currCursorIdx = text[currTextLineIdx].length
-            }
+            moveCursor(cursor, buffer, c.DOWN)
             break
         case 'Enter':
             let textToMoveLower = text[currTextLineIdx].slice(currCursorIdx)
@@ -227,7 +153,6 @@ window.addEventListener('keydown', (e) => {
             }
 
     }
-    updateCursorPos()
 })
 
 window.addEventListener('keyup', (e) => {
@@ -250,94 +175,103 @@ function tryProcessKeyCombination(str) {
     }
 }
 
-function highlightSelection() {
-    highlightParams.x = initialClickPos[0]
-    highlightParams.y = initialClickPos[1]
-    highlightParams.w = blinkingCursorParams[0] - initialClickPos[0]
-    highlightParams.h = userSettings.fontSize
+
+// POINTER #################################################################
+function createPointer() {
+    return {
+        x: 0,
+        y: 0,
+        click: false,
+        pressed: false,
+    }
+}
+function updatePointerPos(pointer, x, y) {
+    pointer.x = x
+    pointer.y = y
 }
 
-let leftClickPressed = false
+function pointerClick(pointer, bool) {
+    pointer.click = bool
+}
 
-window.addEventListener('mousemove', (e) => {
-    let { clientX: x, clientY: y } = e;
+function pointerPressed(pointer, bool) {
+    pointer.pressed = bool
+}
 
-    if (leftClickPressed && initialClickPos[0] != x) {
-
-        if (!isHighlight) {
-            isHighlight = true
-        }
-        positionCursor(x, y)
-        highlightSelection()
-    }
+document.body.addEventListener('pointerdown', function (e) {
+    pointerClick(pointer, true)
+    pointerPressed(pointer, true)
+})
+document.body.addEventListener('pointerup', function (e) {
+    pointerPressed(pointer, false)
 
 })
-
-window.addEventListener('mousedown', (e) => {
-    let { clientX: x, clientY: y } = e;
-    leftClickPressed = e.button == 0
-
-    // handle the case where text is highlighted
-    // and second click should cancel highlight
-    if (isHighlight) {
-        isHighlight = false
-        highlightParams = { x: 0, y: 0, w: 0, h: 0 }
-    }
-    if (leftClickPressed) {
-        // this is basically a normal click
-        // so place cursor correctly
-        positionCursor(x, y)
-
-        // save initial click position to serve as 
-        // potential text selection starting point
-        initialClickPos[0] = blinkingCursorParams[0]
-        initialClickPos[1] = blinkingCursorParams[1]
-    }
-})
-
-window.addEventListener('mouseup', (e) => {
-    let { clientX: x, clientY: y } = e;
-
-    if (leftClickPressed) {
-        leftClickPressed = false
-    }
-})
-
-// Scale canvas on resize
-window.addEventListener('resize', () => {
-    canvas.height = document.body.offsetHeight
-    canvas.width = document.body.offsetWidth
+document.body.addEventListener('pointermove', function (e) {
+    updatePointerPos(pointer, e.offsetX, e.offsetY)
 })
 
 // CURSOR ##################################################################
+const c = {
+    LEFT: 'left',
+    RIGHT: 'right',
+    UP: 'up',
+    DOWN: 'down'
+}
+
 function createCursor(initialLine = 0, initialColumn = 0) {
     return {
         line: initialLine,
         column: initialColumn,
         isVisible: true,
+        isBlinkingActive: true,
         lastBlinkTime: Date.now(),
     }
 }
-
-function moveCursorLeft(cursor, buffer) {
-    if (cursor.column > 0) {
-        cursor.column--
-    } else if (cursor.line > 0) {
-        cursor.line--
-        cursor.column = buffer[cursor.line].length
-    }
-}
-
-function moveCursorRight(cursor, buffer) {
-    if (cursor.column < buffer[cursor.line].length) {
-        cursor.column++
-    } else if (cursor.line < buffer.length - 1) {
-        cursor.line++
-        cursor.column = 0
+function moveCursor(cursor, buffer, direction) {
+    resetCursorBlink(cursor)
+    switch (direction) {
+        case c.LEFT:
+            if (cursor.column > 0) {
+                cursor.column--
+            } else if (cursor.line > 0) {
+                cursor.line--
+                cursor.column = buffer[cursor.line].length
+            }
+            break
+        case c.RIGHT:
+            if (cursor.column < buffer[cursor.line].length) {
+                cursor.column++
+            } else if (cursor.line < buffer.length - 1) {
+                cursor.line++
+                cursor.column = 0
+            }
+            break
+        case c.UP:
+            if (cursor.line > 0) {
+                cursor.line--
+                if (cursor.column > buffer[cursor.line].length) {
+                    cursor.column = buffer[cursor.line].length
+                }
+            } else if (cursor.column > 0) {
+                cursor.column = 0
+            }
+            break
+        case c.DOWN:
+            if (cursor.line < buffer.length - 1) {
+                cursor.line++
+                if (cursor.column > buffer[cursor.line].length) {
+                    cursor.column = buffer[cursor.line].length
+                }
+            } else if (cursor.column < buffer[cursor.line].length) {
+                cursor.column = buffer[cursor.line].length
+            }
+            break
     }
 }
 
 function updateCursorBlink(cursor) {
+    if (!cursor.isBlinkingActive) return
+
     let now = Date.now()
     if (now - cursor.lastBlinkTime > 500) {
         cursor.lastBlinkTime = now
@@ -345,14 +279,17 @@ function updateCursorBlink(cursor) {
     }
 }
 
+function resetCursorBlink(cursor) {
+    cursor.lastBlinkTime = Date.now()
+    cursor.isVisible = true
+}
+
 function moveCursorToPosition(cursor, line, column) {
     cursor.line = line
     cursor.column = column
 }
 
-function convertCoordsToCursorPos(buffer, x, y) {
 
-}
 function getCursorCoords(cursor, charWidth, textHeight) {
     const x = cursor.column * charWidth
     const y = cursor.line * textHeight
@@ -363,17 +300,11 @@ function getCursorCoords(cursor, charWidth, textHeight) {
 
 }
 
-
-function updateCursorPos() {
-    blinkingCursorParams.x = LINE_START_TEXT + charWidth * currCursorIdx - cursorSize[0] / 2
-    blinkingCursorParams.y = userSettings.fontSize * currTextLineIdx + (cursorHeight - userSettings.fontSize) / 2
-}
-
-function positionCursor(x, y) {
+function convertCoordsToCursorPos(cursor, buffer, x, y, charWidth, textHeight) {
     // if clicked too high up the page
-    if (y < userSettings.fontSize) {
+    if (y < textHeight) {
         // focus first line
-        currTextLineIdx = 0
+        cursor.line = 0
     } else {
         // focus correct text line depending on fontSize
         // these are indexes so we subtract 1 every time
@@ -399,19 +330,13 @@ function positionCursor(x, y) {
         }
     }
 
-    updateCursorPos()
 }
 
 function drawBlinkingCursor(ctx, cursor, editorConfig) {
-
-    // line: initialLine,
-    // column: initialColumn,
-    // isVisible: true,
-    // lastBlinkTime: Date.now(),
     let { cursorX, cursorY } = getCursorCoords(cursor, editorConfig.editorCharWidth, editorConfig.editorTextHeight)
     updateCursorBlink(cursor)
     if (cursor.isVisible) {
-        ctx.fillRect(cursorX, cursorY, 2, editorConfig.editorTextHeight)
+        ctx.fillRect(cursorX, cursorY + editorConfig.editorTextBaseline.heightBelow, 2, editorConfig.editorTextHeight)
         ctx.fillStyle = userSettings.fontColor
     }
 }
@@ -541,6 +466,53 @@ function drawText(ctx, buffer, editorConfig) {
     ctx.fillStyle = userSettings.fontColor
     for (const [i, line] of buffer.entries()) {
         ctx.fillText(line, 0, editorConfig.editorTextHeight * (i + 1))
-        charWidth = ctx.measureText('a').width
     }
 }
+
+function drawRect(ctx, x, y, width, height, color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, width, height);
+}
+
+function clearCanvas(ctx, width, height) {
+    ctx.clearRect(0, 0, width, height);
+}
+
+// Position and resize canvas with CSS
+function positionCanvas(canvas, left, top, width, height) {
+    canvas.style.left = `${left}px`
+    canvas.style.top = `${top}px`
+    canvas.style.width = `${width}px`
+    canvas.style.height = `${height}px`
+}
+
+// Resize canvas (handling high DPI screens)
+function resizeCanvas(canvas, width, height) {
+    // Set actual size in memory (scaled for high DPI screens)
+    const dpr = window.devicePixelRatio || 1
+    canvas.width = width * dpr
+    canvas.height = height * dpr
+    // Scale the context
+    const ctx = canvas.getContext('2d')
+    ctx.scale(dpr, dpr)
+
+    return { width, height }
+}
+
+window.addEventListener('resize', (e) => {
+    updateLayout()
+    editorCtx.font = `${userSettings.fontSize}px ${userSettings.fontFamily}`
+})
+
+window.addEventListener('DOMContentLoaded', async () => {
+    updateLayout()
+
+    userSettings = await (await fetch('./settings.json')).json()
+    editorCtx.font = `${userSettings.fontSize}px ${userSettings.fontFamily}`
+    editorCanvas.style.cursor = 'text'
+    editorConfig = {
+        ...textMeasure(editorCtx.font)
+    }
+
+    requestAnimationFrame(draw);
+})
